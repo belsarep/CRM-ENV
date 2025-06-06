@@ -1,0 +1,13 @@
+[Unit]
+Description=Email Platform Frontend (Nginx)
+After=network.target
+Requires=nginx.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/systemctl reload nginx
+ExecReload=/bin/systemctl reload nginx
+
+[Install]
+WantedBy=multi-user.target

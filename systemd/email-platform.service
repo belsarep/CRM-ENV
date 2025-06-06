@@ -1,0 +1,43 @@
+[Unit]
+Description=Email Management Platform
+After=network.target
+After=mysql.service
+Requires=mysql.service
+
+[Service]
+Type=simple
+User=email-platform
+Group=email-platform
+WorkingDirectory=/opt/email-platform
+ExecStart=/usr/bin/node server/index.js
+Restart=always
+RestartSec=10
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=email-platform
+
+# Environment variables
+Environment=NODE_ENV=production
+Environment=PORT=3001
+Environment=DB_HOST=localhost
+Environment=DB_PORT=3306
+Environment=DB_USER=email_platform
+Environment=DB_PASSWORD=secure_password_here
+Environment=DB_NAME=email_platform
+Environment=JWT_SECRET=your_jwt_secret_key_here
+Environment=FRONTEND_URL=https://your-domain.com
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/email-platform/logs
+ReadWritePaths=/tmp
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+[Install]
+WantedBy=multi-user.target
