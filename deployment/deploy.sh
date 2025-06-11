@@ -46,20 +46,44 @@ apt update && apt upgrade -y
 print_status "Installing required packages..."
 apt install -y nodejs npm mysql-server nginx certbot python3-certbot-nginx
 
-# Start and enable MySQL service
-print_status "Starting MySQL service..."
-systemctl start mysql
+# Configure MySQL to start automatically and bind to localhost
+print_status "Configuring MySQL..."
 systemctl enable mysql
 
-# Wait for MySQL to be ready
-print_status "Waiting for MySQL to be ready..."
-sleep 5
+# Start MySQL service
+print_status "Starting MySQL service..."
+systemctl start mysql
 
-# Verify MySQL is running
+# Wait for MySQL to be ready and verify it's listening on port 3306
+print_status "Waiting for MySQL to be ready..."
+for i in {1..30}; do
+    if mysqladmin ping --silent; then
+        print_status "MySQL is ready!"
+        break
+    fi
+    if [ $i -eq 30 ]; then
+        print_error "MySQL failed to start properly"
+        systemctl status mysql
+        exit 1
+    fi
+    echo "Waiting for MySQL... ($i/30)"
+    sleep 2
+done
+
+# Verify MySQL is running and listening on port 3306
 if ! systemctl is-active --quiet mysql; then
     print_error "MySQL service failed to start"
+    systemctl status mysql
     exit 1
 fi
+
+if ! netstat -ln | grep -q ":3306 "; then
+    print_error "MySQL is not listening on port 3306"
+    netstat -ln | grep mysql || true
+    exit 1
+fi
+
+print_status "MySQL is running and listening on port 3306"
 
 # Install PM2 for process management
 npm install -g pm2
@@ -82,6 +106,13 @@ mysql -e "CREATE DATABASE IF NOT EXISTS $DB_NAME;"
 mysql -e "CREATE USER IF NOT EXISTS '$DB_USER'@'localhost' IDENTIFIED BY 'secure_password_here';"
 mysql -e "GRANT ALL PRIVILEGES ON $DB_NAME.* TO '$DB_USER'@'localhost';"
 mysql -e "FLUSH PRIVILEGES;"
+
+# Test database connection
+print_status "Testing database connection..."
+mysql -u $DB_USER -psecure_password_here -e "SELECT 1;" $DB_NAME || {
+    print_error "Failed to connect to database with application credentials"
+    exit 1
+}
 
 # Copy application files (assumes you're running from the project directory)
 print_status "Copying application files..."
