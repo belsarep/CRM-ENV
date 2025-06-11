@@ -46,6 +46,21 @@ apt update && apt upgrade -y
 print_status "Installing required packages..."
 apt install -y nodejs npm mysql-server nginx certbot python3-certbot-nginx
 
+# Start and enable MySQL service
+print_status "Starting MySQL service..."
+systemctl start mysql
+systemctl enable mysql
+
+# Wait for MySQL to be ready
+print_status "Waiting for MySQL to be ready..."
+sleep 5
+
+# Verify MySQL is running
+if ! systemctl is-active --quiet mysql; then
+    print_error "MySQL service failed to start"
+    exit 1
+fi
+
 # Install PM2 for process management
 npm install -g pm2
 
