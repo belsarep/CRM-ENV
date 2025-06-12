@@ -104,7 +104,9 @@ chown -R $APP_USER:$APP_USER $APP_DIR
 print_status "Setting up MySQL database..."
 mysql -e "CREATE DATABASE IF NOT EXISTS $DB_NAME;"
 mysql -e "CREATE USER IF NOT EXISTS '$DB_USER'@'localhost' IDENTIFIED BY 'secure_password_here';"
+mysql -e "CREATE USER IF NOT EXISTS '$DB_USER'@'127.0.0.1' IDENTIFIED BY 'secure_password_here';"
 mysql -e "GRANT ALL PRIVILEGES ON $DB_NAME.* TO '$DB_USER'@'localhost';"
+mysql -e "GRANT ALL PRIVILEGES ON $DB_NAME.* TO '$DB_USER'@'127.0.0.1';"
 mysql -e "FLUSH PRIVILEGES;"
 
 # Test database connection
