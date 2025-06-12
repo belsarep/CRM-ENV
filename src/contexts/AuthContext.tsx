@@ -53,8 +53,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
 
       if (response.ok) {
-        const userData = await response.json();
-        setUser(userData);
+        const text = await response.text();
+        if (text) {
+          const userData = JSON.parse(text);
+          setUser(userData);
+        } else {
+          throw new Error('Empty response from server');
+        }
       } else {
         localStorage.removeItem('token');
         setToken(null);
@@ -78,15 +83,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Login failed');
+      const text = await response.text();
+      let errorMessage = 'Login failed';
+      
+      try {
+        if (text) {
+          const error = JSON.parse(text);
+          errorMessage = error.error || 'Login failed';
+        }
+      } catch (parseError) {
+        console.error('Failed to parse error response:', parseError);
+        errorMessage = `Server error: ${response.status}`;
+      }
+      
+      throw new Error(errorMessage);
     }
 
-    const { token: authToken, user: userData } = await response.json();
-    
-    localStorage.setItem('token', authToken);
-    setToken(authToken);
-    setUser(userData);
+    const text = await response.text();
+    if (!text) {
+      throw new Error('Empty response from server');
+    }
+
+    try {
+      const { token: authToken, user: userData } = JSON.parse(text);
+      
+      localStorage.setItem('token', authToken);
+      setToken(authToken);
+      setUser(userData);
+    } catch (parseError) {
+      console.error('Failed to parse login response:', parseError);
+      throw new Error('Invalid response from server');
+    }
   };
 
   const logout = () => {

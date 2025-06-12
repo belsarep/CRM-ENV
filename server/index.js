@@ -38,6 +38,15 @@ app.use((req, res, next) => {
   next();
 });
 
+// Error handling for JSON parsing
+app.use((error, req, res, next) => {
+  if (error instanceof SyntaxError && error.status === 400 && 'body' in error) {
+    logger.error('JSON parsing error:', error);
+    return res.status(400).json({ error: 'Invalid JSON in request body' });
+  }
+  next(error);
+});
+
 // API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/dashboard', dashboardRoutes);
@@ -48,10 +57,14 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
-// Error handling middleware
+// Global error handling middleware
 app.use((error, req, res, next) => {
   logger.error('Unhandled error:', error);
-  res.status(500).json({ error: 'Internal server error' });
+  
+  // Ensure we always send valid JSON
+  if (!res.headersSent) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // 404 handler
