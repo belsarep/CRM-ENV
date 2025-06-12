@@ -19,7 +19,7 @@ SyslogIdentifier=email-platform
 # Environment variables
 Environment=NODE_ENV=production
 Environment=PORT=3001
-Environment=DB_HOST=localhost
+Environment=DB_HOST=127.0.0.1
 Environment=DB_PORT=3306
 Environment=DB_USER=email_platform
 Environment=DB_PASSWORD=secure_password_here
