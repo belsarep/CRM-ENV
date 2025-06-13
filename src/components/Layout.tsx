@@ -9,7 +9,8 @@ import {
   Menu, 
   X,
   Bell,
-  Search
+  Search,
+  UserCheck
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 
@@ -27,17 +28,26 @@ export default function Layout({ children }: LayoutProps) {
     { name: 'Contacts', href: '/contacts', icon: Users },
     { name: 'Campaigns', href: '/campaigns', icon: Mail },
     { name: 'Analytics', href: '/analytics', icon: BarChart3 },
+    { name: 'Team', href: '/users', icon: UserCheck },
     { name: 'Settings', href: '/settings', icon: Settings },
   ];
 
   const isActivePath = (path: string) => location.pathname === path;
+
+  // Filter navigation based on user permissions
+  const filteredNavigation = navigation.filter(item => {
+    if (item.href === '/users') {
+      return user?.role === 'admin' || user?.role === 'manager';
+    }
+    return true;
+  });
 
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Mobile sidebar overlay */}
       {sidebarOpen && (
         <div className="fixed inset-0 z-40 lg:hidden">
-          <div className="fixed inset-0 bg-gray-600 bg-opacity-75\" onClick={() => setSidebarOpen(false)} />
+          <div className="fixed inset-0 bg-gray-600 bg-opacity-75" onClick={() => setSidebarOpen(false)} />
         </div>
       )}
 
@@ -55,7 +65,7 @@ export default function Layout({ children }: LayoutProps) {
 
         <nav className="mt-8 px-6">
           <div className="space-y-2">
-            {navigation.map((item) => {
+            {filteredNavigation.map((item) => {
               const Icon = item.icon;
               return (
                 <Link
@@ -87,7 +97,9 @@ export default function Layout({ children }: LayoutProps) {
               <p className="text-sm font-medium text-gray-900">
                 {user?.firstName} {user?.lastName}
               </p>
-              <p className="text-xs text-gray-500">{user?.organizationName}</p>
+              <p className="text-xs text-gray-500">
+                {user?.role} • {user?.organizationName}
+              </p>
             </div>
           </div>
           <button

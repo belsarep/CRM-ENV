@@ -6,6 +6,7 @@ import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
 import ContactsPage from './pages/ContactsPage';
 import AnalyticsPage from './pages/AnalyticsPage';
+import UsersPage from './pages/UsersPage';
 import Layout from './components/Layout';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -29,9 +30,9 @@ function AppRoutes() {
     <Routes>
       <Route 
         path="/login" 
-        element={user ? <Navigate to="/dashboard\" replace /> : <LoginPage />} 
+        element={user ? <Navigate to="/dashboard" replace /> : <LoginPage />} 
       />
-      <Route path="/" element={<Navigate to="/dashboard\" replace />} />
+      <Route path="/" element={<Navigate to="/dashboard" replace />} />
       <Route
         path="/dashboard"
         element={
@@ -58,6 +59,16 @@ function AppRoutes() {
           <ProtectedRoute>
             <Layout>
               <AnalyticsPage />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/users"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <UsersPage />
             </Layout>
           </ProtectedRoute>
         }

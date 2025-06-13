@@ -13,6 +13,7 @@ APP_USER="email-platform"
 APP_DIR="/opt/email-platform"
 DB_NAME="email_platform"
 DB_USER="email_platform"
+DB_PASSWORD="$(openssl rand -base64 32 | tr -d "=+/" | cut -c1-25)"
 
 # Colors for output
 RED='\033[0;31m'
@@ -44,20 +45,20 @@ apt update && apt upgrade -y
 
 # Install required packages
 print_status "Installing required packages..."
-apt install -y nodejs npm mysql-server nginx certbot python3-certbot-nginx
+DEBIAN_FRONTEND=noninteractive apt install -y \
+    nodejs npm mysql-server nginx certbot python3-certbot-nginx \
+    curl wget gnupg2 software-properties-common \
+    build-essential
 
-# Configure MySQL to start automatically and bind to localhost
+# Configure MySQL properly
 print_status "Configuring MySQL..."
 systemctl enable mysql
-
-# Start MySQL service
-print_status "Starting MySQL service..."
 systemctl start mysql
 
-# Wait for MySQL to be ready and verify it's listening on port 3306
+# Wait for MySQL to be ready
 print_status "Waiting for MySQL to be ready..."
 for i in {1..30}; do
-    if mysqladmin ping --silent; then
+    if mysqladmin ping --silent 2>/dev/null; then
         print_status "MySQL is ready!"
         break
     fi
@@ -70,22 +71,17 @@ for i in {1..30}; do
     sleep 2
 done
 
-# Verify MySQL is running and listening on port 3306
-if ! systemctl is-active --quiet mysql; then
-    print_error "MySQL service failed to start"
-    systemctl status mysql
-    exit 1
-fi
-
-if ! netstat -ln | grep -q ":3306 "; then
-    print_error "MySQL is not listening on port 3306"
-    netstat -ln | grep mysql || true
-    exit 1
-fi
-
-print_status "MySQL is running and listening on port 3306"
+# Secure MySQL installation
+print_status "Securing MySQL installation..."
+mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '${DB_PASSWORD}';" 2>/dev/null || true
+mysql -e "DELETE FROM mysql.user WHERE User='';" 2>/dev/null || true
+mysql -e "DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');" 2>/dev/null || true
+mysql -e "DROP DATABASE IF EXISTS test;" 2>/dev/null || true
+mysql -e "DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';" 2>/dev/null || true
+mysql -e "FLUSH PRIVILEGES;" 2>/dev/null || true
 
 # Install PM2 for process management
+print_status "Installing PM2..."
 npm install -g pm2
 
 # Create application user
@@ -100,18 +96,29 @@ mkdir -p $APP_DIR
 mkdir -p $APP_DIR/logs
 chown -R $APP_USER:$APP_USER $APP_DIR
 
-# Setup MySQL database
+# Setup MySQL database with proper authentication
 print_status "Setting up MySQL database..."
-mysql -e "CREATE DATABASE IF NOT EXISTS $DB_NAME;"
-mysql -e "CREATE USER IF NOT EXISTS '$DB_USER'@'localhost' IDENTIFIED BY 'secure_password_here';"
-mysql -e "CREATE USER IF NOT EXISTS '$DB_USER'@'127.0.0.1' IDENTIFIED BY 'secure_password_here';"
+mysql -u root -p${DB_PASSWORD} -e "CREATE DATABASE IF NOT EXISTS $DB_NAME CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" 2>/dev/null || \
+mysql -e "CREATE DATABASE IF NOT EXISTS $DB_NAME CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+
+mysql -u root -p${DB_PASSWORD} -e "CREATE USER IF NOT EXISTS '$DB_USER'@'localhost' IDENTIFIED WITH mysql_native_password BY '$DB_PASSWORD';" 2>/dev/null || \
+mysql -e "CREATE USER IF NOT EXISTS '$DB_USER'@'localhost' IDENTIFIED WITH mysql_native_password BY '$DB_PASSWORD';"
+
+mysql -u root -p${DB_PASSWORD} -e "CREATE USER IF NOT EXISTS '$DB_USER'@'127.0.0.1' IDENTIFIED WITH mysql_native_password BY '$DB_PASSWORD';" 2>/dev/null || \
+mysql -e "CREATE USER IF NOT EXISTS '$DB_USER'@'127.0.0.1' IDENTIFIED WITH mysql_native_password BY '$DB_PASSWORD';"
+
+mysql -u root -p${DB_PASSWORD} -e "GRANT ALL PRIVILEGES ON $DB_NAME.* TO '$DB_USER'@'localhost';" 2>/dev/null || \
 mysql -e "GRANT ALL PRIVILEGES ON $DB_NAME.* TO '$DB_USER'@'localhost';"
+
+mysql -u root -p${DB_PASSWORD} -e "GRANT ALL PRIVILEGES ON $DB_NAME.* TO '$DB_USER'@'127.0.0.1';" 2>/dev/null || \
 mysql -e "GRANT ALL PRIVILEGES ON $DB_NAME.* TO '$DB_USER'@'127.0.0.1';"
+
+mysql -u root -p${DB_PASSWORD} -e "FLUSH PRIVILEGES;" 2>/dev/null || \
 mysql -e "FLUSH PRIVILEGES;"
 
 # Test database connection
 print_status "Testing database connection..."
-mysql -u $DB_USER -psecure_password_here -e "SELECT 1;" $DB_NAME || {
+mysql -u $DB_USER -p$DB_PASSWORD -e "SELECT 1;" $DB_NAME || {
     print_error "Failed to connect to database with application credentials"
     exit 1
 }
@@ -130,17 +137,78 @@ sudo -u $APP_USER npm install --production
 print_status "Building frontend..."
 sudo -u $APP_USER npm run build
 
+# Create environment file
+print_status "Creating environment configuration..."
+cat > $APP_DIR/.env << EOF
+NODE_ENV=production
+PORT=3001
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_USER=$DB_USER
+DB_PASSWORD=$DB_PASSWORD
+DB_NAME=$DB_NAME
+JWT_SECRET=$(openssl rand -base64 64 | tr -d "=+/" | cut -c1-64)
+FRONTEND_URL=https://localhost
+BCRYPT_ROUNDS=12
+SESSION_SECRET=$(openssl rand -base64 32 | tr -d "=+/" | cut -c1-32)
+RATE_LIMIT_WINDOW_MS=900000
+RATE_LIMIT_MAX_REQUESTS=1000
+MAX_FILE_SIZE=10485760
+BACKUP_RETENTION_DAYS=30
+BACKUP_SCHEDULE="0 2 * * *"
+LOG_LEVEL=info
+EOF
+
+chown $APP_USER:$APP_USER $APP_DIR/.env
+chmod 600 $APP_DIR/.env
+
 # Run database migrations
 print_status "Running database migrations..."
-sudo -u $APP_USER npm run db:migrate
-sudo -u $APP_USER npm run db:seed
+cd $APP_DIR
+sudo -u $APP_USER NODE_ENV=production npm run db:migrate
+sudo -u $APP_USER NODE_ENV=production npm run db:seed
 
-# Setup systemd service
+# Update systemd service with correct environment
 print_status "Setting up systemd service..."
-cp systemd/email-platform.service /etc/systemd/system/
+cat > /etc/systemd/system/email-platform.service << EOF
+[Unit]
+Description=Email Management Platform
+After=network.target mysql.service
+Requires=mysql.service
+
+[Service]
+Type=simple
+User=$APP_USER
+Group=$APP_USER
+WorkingDirectory=$APP_DIR
+ExecStart=/usr/bin/node server/index.js
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=email-platform
+
+# Environment file
+EnvironmentFile=$APP_DIR/.env
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=$APP_DIR/logs
+ReadWritePaths=/tmp
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 systemctl daemon-reload
 systemctl enable email-platform
-systemctl start email-platform
 
 # Setup Nginx
 print_status "Configuring Nginx..."
@@ -151,14 +219,10 @@ rm -f /etc/nginx/sites-enabled/default
 # Test Nginx configuration
 nginx -t
 
-# Setup SSL (you'll need to replace your-domain.com with your actual domain)
-print_warning "SSL setup requires manual configuration. Run:"
-print_warning "certbot --nginx -d your-domain.com -d www.your-domain.com"
-
 # Start services
 print_status "Starting services..."
+systemctl start email-platform
 systemctl restart nginx
-systemctl restart email-platform
 
 # Setup log rotation
 print_status "Setting up log rotation..."
@@ -209,15 +273,22 @@ echo "0 2 * * * /usr/local/bin/backup-email-platform.sh" | crontab -
 
 # Final status check
 print_status "Checking service status..."
+sleep 5
 systemctl status email-platform --no-pager
 systemctl status nginx --no-pager
 
 print_status "Deployment completed successfully! 🎉"
-print_warning "Don't forget to:"
+print_warning "Important configuration details:"
+echo "   - Database User: $DB_USER"
+echo "   - Database Password: $DB_PASSWORD"
+echo "   - Application Directory: $APP_DIR"
+echo "   - Environment File: $APP_DIR/.env"
+echo ""
+print_warning "Next steps:"
 print_warning "1. Update the domain name in /etc/nginx/sites-available/email-platform"
 print_warning "2. Set up SSL with: certbot --nginx -d your-domain.com"
-print_warning "3. Update environment variables in /etc/systemd/system/email-platform.service"
-print_warning "4. Change default database password"
+print_warning "3. Update FRONTEND_URL in $APP_DIR/.env"
+print_warning "4. Restart services: systemctl restart email-platform nginx"
 
 echo ""
 echo "📋 Application Info:"
@@ -226,3 +297,5 @@ echo "   - Application Directory: $APP_DIR"
 echo "   - Log Files: $APP_DIR/logs/"
 echo "   - Service: systemctl status email-platform"
 echo "   - Default Login: admin@demo.com / admin123"
+echo ""
+print_warning "⚠️ SECURITY: Change the default admin password immediately!"
